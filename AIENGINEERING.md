@@ -13,6 +13,7 @@ My summary notes from an AI engineering course.
 - [RAG](#rag)
 - [LangGraph](#langgraph)
 - [MCP](#mcp)
+- [A2A (Agent-to-Agent Protocol)](#a2a-agent-to-agent-protocol)
 
 ---
 
@@ -112,10 +113,73 @@ LangGraph supports:
 
 ## MCP
 
-**Model Context Protocol (MCP)** is a standard created by Anthropic.
+**Model Context Protocol (MCP)** is an open standard created by Anthropic (released in late 2024) for connecting AI applications to external tools and data.
 
-**Problem:** when building a chatbot, we connect the AI to an internal DB. Connecting to an external system to fetch information takes time and custom work.
+### The problem
 
-**Idea:** MCP is like an API, but designed for AI agents. A normal API requires the developer to know the endpoints, URLs and the kind of data each system supports. MCP provides **self-describing interfaces** that an AI agent can understand and use on its own. This moves the integration effort from the developer to the agent.
+When building a chatbot, we connect the AI to an internal DB. Connecting to an external system to fetch information takes time and custom work: every system has its own API, endpoints, URLs, authentication and data formats, and every integration is written by hand.
 
-The community has already written MCP servers for GitHub, SQL databases and more. You can use them directly in your agent without writing any code.
+### The idea
+
+MCP is like an API, but designed for AI agents. A normal API requires the developer to know the endpoints, URLs and the kind of data each system supports. MCP provides **self-describing interfaces**: the server tells the agent what it can do, and the agent understands and uses it on its own. This moves the integration effort from the developer to the agent.
+
+A common analogy: MCP is the **USB-C port for AI**. One standard connector instead of a custom cable for every tool.
+
+### Architecture
+
+| Part | Role |
+|---|---|
+| **Host** | The AI application the user interacts with (Claude Desktop, an IDE, your own agent). |
+| **MCP client** | Lives inside the host and keeps a 1:1 connection with one MCP server. |
+| **MCP server** | A small program that exposes a system (GitHub, a SQL DB, the file system...) to the AI. |
+
+```
+User → Host (LLM) → MCP client ⇄ MCP server → External system (DB, API, files)
+```
+
+Messages between client and server use **JSON-RPC 2.0**.
+
+### What an MCP server can expose
+
+- **Tools:** actions the model can call, e.g. "run this SQL query" or "create a GitHub issue".
+- **Resources:** data the model can read, e.g. files, DB records, documents.
+- **Prompts:** reusable prompt templates provided by the server.
+
+### Transports (how client and server talk)
+
+- **stdio (local):** the host starts the MCP server as a local process on your machine and talks to it through standard input/output. Simple and private, good for local files and dev tools.
+- **Streamable HTTP (remote):** the server runs somewhere else and is reached over HTTP. Used for shared or cloud-hosted servers, and needs proper authentication.
+
+### Ready-made servers
+
+The community has already written MCP servers for GitHub, SQL databases, file systems, Slack and more. You can use them directly in your agent without writing any code.
+
+### Security notes
+
+- Only install MCP servers you trust: a server can read data and run actions with the permissions you give it.
+- Give each server the minimum access it needs, and keep secrets (tokens) out of prompts.
+
+## A2A (Agent-to-Agent Protocol)
+
+MCP connects **an agent to tools and data**. But what if we have several agents, possibly built by different teams or on different frameworks, and they need to work together? For that there is **A2A (Agent2Agent)**, an open protocol introduced by Google in 2025.
+
+| Protocol | Connects | Question it answers |
+|---|---|---|
+| **MCP** | Agent ↔ tools / data | "How does my agent use this tool?" |
+| **A2A** | Agent ↔ agent | "How does my agent talk to another agent?" |
+
+They are **complementary, not competing**: each agent uses MCP to reach its own tools, and A2A to collaborate with other agents.
+
+How A2A works:
+
+- **Agent Card:** a JSON file where an agent describes itself (name, skills, endpoint, authentication), so other agents can discover it.
+- **Client agent and remote agent:** one agent sends a task, the other performs it.
+- **Tasks:** the unit of work, with a life cycle (submitted, working, completed...), which supports long-running jobs and streaming updates.
+- **Messages and artifacts:** the agents exchange messages, and the result of a task is returned as an artifact.
+- Built on standard web tech: HTTP and JSON-RPC.
+
+```
+User → Orchestrator agent
+          ├─ A2A → Research agent  ── MCP → Vector DB / web search
+          └─ A2A → Database agent  ── MCP → SQL server
+```
